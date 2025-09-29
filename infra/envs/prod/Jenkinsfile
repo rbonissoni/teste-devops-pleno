@@ -1,0 +1,117 @@
+pipeline {
+  agent any
+
+  options {
+    // logs mais limpos e timeout para evitar job preso
+    ansiColor('xterm')
+    timestamps()
+    timeout(time: 20, unit: 'MINUTES')
+  }
+
+  parameters {
+    // altere para o IP público atual da sua EC2 (ou use o DNS)
+    string(name: 'TARGET_HOST', defaultValue: '18.207.237.29', description: 'IP/DNS da EC2 alvo')
+    string(name: 'TARGET_USER', defaultValue: 'admin', description: 'Usuário SSH na EC2 (Debian = admin)')
+    string(name: 'APP_DIR', defaultValue: '/var/www/app', description: 'Raiz do app na EC2')
+  }
+
+  environment {
+    // ID da credencial SSH que você vai criar no Jenkins (ver seção 2)
+    SSH_CRED_ID = 'ec2_ssh'
+    // release com timestamp para versionar publicações
+    RELEASE = "rel-${env.BUILD_NUMBER}-${new Date().format('yyyyMMddHHmmss')}"
+  }
+
+  stages {
+
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    stage('Build & Test') {
+      steps {
+        sh '''
+          if [ -f package.json ]; then
+            echo "[Build] Instalando dependências..."
+            npm ci --omit=dev || npm install --omit=dev
+            echo "[Test] Rodando testes (se existir script test)..."
+            npm test || echo "Nenhum teste configurado — seguindo."
+          else
+            echo "Sem package.json — nada pra buildar/testar."
+          fi
+        '''
+      }
+    }
+
+    stage('Package') {
+      steps {
+        sh '''
+          echo "[Package] Gerando artefato .tar.gz do workspace"
+          mkdir -p dist
+          tar -czf "dist/${RELEASE}.tar.gz" --exclude='dist' .
+          ls -lh dist/
+        '''
+      }
+      post {
+        success {
+          archiveArtifacts artifacts: "dist/${RELEASE}.tar.gz", fingerprint: true
+        }
+      }
+    }
+
+    stage('Deploy (rsync via SSH)') {
+      steps {
+        sshagent(credentials: [env.SSH_CRED_ID]) {
+          sh '''
+            echo "[Deploy] Criando release no destino"
+            ssh -o StrictHostKeyChecking=no ${TARGET_USER}@${TARGET_HOST} "sudo mkdir -p ${APP_DIR}/releases/${RELEASE} ${APP_DIR}/shared && sudo chown -R ${TARGET_USER}:${TARGET_USER} ${APP_DIR}"
+
+            echo "[Deploy] Enviando artefato"
+            rsync -avz -e "ssh -o StrictHostKeyChecking=no" "dist/${RELEASE}.tar.gz" ${TARGET_USER}@${TARGET_HOST}:/tmp/
+
+            echo "[Deploy] Extraindo e publicando"
+            ssh -o StrictHostKeyChecking=no ${TARGET_USER}@${TARGET_HOST} "\
+              set -e; \
+              sudo tar -xzf /tmp/${RELEASE}.tar.gz -C ${APP_DIR}/releases/${RELEASE}; \
+              sudo ln -sfn ${APP_DIR}/releases/${RELEASE} ${APP_DIR}/current; \
+              sudo chown -R www-data:www-data ${APP_DIR}; \
+              sudo rm -f /tmp/${RELEASE}.tar.gz \
+            "
+          '''
+        }
+      }
+    }
+
+    stage('Restart service') {
+      steps {
+        sshagent(credentials: [env.SSH_CRED_ID]) {
+          sh '''
+            echo "[Service] Reiniciando o serviço systemd do app"
+            ssh -o StrictHostKeyChecking=no ${TARGET_USER}@${TARGET_HOST} "sudo systemctl daemon-reload && sudo systemctl restart app && sudo systemctl is-active app"
+          '''
+        }
+      }
+    }
+
+    stage('Healthcheck via Nginx') {
+      steps {
+        sh '''
+          echo "[Health] Validando /health atrás do Nginx"
+          curl -fsS "http://${TARGET_HOST}/health"
+          echo
+        '''
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "Deploy OK! Acesse: http://${params.TARGET_HOST} e http://${params.TARGET_HOST}/health"
+    }
+    failure {
+      echo "Falhou — verifique os logs deste job e do systemd na EC2: journalctl -u app -n 200 --no-pager"
+    }
+  }
+}

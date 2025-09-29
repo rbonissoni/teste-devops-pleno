@@ -1,0 +1,1 @@
+const express=require('express');const app=express();const port=process.env.PORT||3000;app.get('/',(r,s)=>s.send('OK - Home'));app.get('/health',(r,s)=>s.json({status:'ok'}));app.listen(port,()=>console.log(`App running on port ${port}`));

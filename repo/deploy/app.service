@@ -1,0 +1,13 @@
+[Unit]
+Description=Node App Service
+After=network.target
+[Service]
+Environment=PORT=3000
+WorkingDirectory=/var/www/app/current
+ExecStart=/usr/bin/node app.js
+Restart=always
+RestartSec=5
+User=www-data
+Group=www-data
+[Install]
+WantedBy=multi-user.target

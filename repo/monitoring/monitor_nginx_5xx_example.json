@@ -1,0 +1,17 @@
+{
+  "name": "High 5xx on Nginx (example)",
+  "type": "log alert",
+  "query": "logs(\"service:nginx status:error\").index(\"*\").rollup(\"count\").by(\"host\").last(\"5m\") > 10",
+  "message": "Aumento de erros no Nginx. @pagerduty @slack-ops",
+  "tags": [
+    "env:prod",
+    "service:nginx"
+  ],
+  "options": {
+    "thresholds": {
+      "critical": 10
+    },
+    "notify_no_data": false,
+    "no_data_timeframe": 20
+  }
+}

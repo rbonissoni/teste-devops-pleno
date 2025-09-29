@@ -1,0 +1,12 @@
+{
+  "name": "devops-pleno-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node app.js",
+    "test": "node test/health.test.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
