@@ -1,6 +1,6 @@
 pipeline {
   agent any
-  options { timestamps(); ansiColor('xterm') }
+  options { timestamps() }
 
   parameters {
     string(name: 'DEPLOY_HOST', defaultValue: '', description: 'IP público da EC2 (ex: 44.197.x.y)')
